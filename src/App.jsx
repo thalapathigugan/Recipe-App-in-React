@@ -22,8 +22,60 @@ function setLocal(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+// Context-aware search utility class
+class ContextualSearchManager {
+  static searchInContext(items, searchTerm, currentView) {
+    if (!searchTerm || searchTerm.trim() === '') {
+      return items; // Return all items if no search term
+    }
+
+    const query = searchTerm.toLowerCase().trim();
+    
+    return items.filter(recipe => {
+      const searchableFields = [
+        recipe.strMeal,
+        recipe.strCategory,
+        recipe.strArea,
+        recipe.strTags,
+        recipe.strInstructions
+      ].filter(Boolean); // Remove undefined/null values
+
+      return searchableFields.some(field => 
+        field.toLowerCase().includes(query)
+      );
+    });
+  }
+
+  static getSearchPlaceholder(currentView) {
+    switch (currentView) {
+      case 'cart':
+        return 'Search items in your cart...';
+      case 'favorites':
+        return 'Search your favorite recipes...';
+      default:
+        return 'Search recipes...';
+    }
+  }
+
+  static getResultsMessage(totalResults, filteredResults, searchTerm, currentView) {
+    const context = currentView === 'cart' ? 'cart' : 
+                   currentView === 'favorites' ? 'favorites' : 'recipes';
+    
+    if (!searchTerm || searchTerm.trim() === '') {
+      return `Showing all ${context} (${totalResults})`;
+    }
+    
+    if (filteredResults === 0) {
+      return `No results found in ${context} for "${searchTerm}"`;
+    }
+    
+    return `Found ${filteredResults} result(s) in ${context} for "${searchTerm}"`;
+  }
+}
+
 function App() {
   const [recipes, setRecipes] = useState([]);
+  const [filteredRecipes, setFilteredRecipes] = useState([]); // New state for filtered results
   const [categories, setCategories] = useState([]);
   const [currentView, setCurrentView] = useState('home');
   const [currentCategory, setCurrentCategory] = useState(null);
@@ -58,18 +110,21 @@ function App() {
           const data = await res.json();
           return data.meals ? data.meals[0] : null;
         }));
-        result = recipes;
+        result = recipes.filter(Boolean);
       } else {
-        // CATEGORY-SPECIFIC SEARCH LOGIC
-        // If both category and search term are present, search within the category
-        if (currentCategory && searchTerm) {
+        // For home/search/category views, only fetch from API if no search term
+        // or if we're not in favorites/cart context
+        if (currentCategory && !searchTerm) {
+          const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
+          const data = await res.json();
+          result = data.meals || [];
+        } else if (currentCategory && searchTerm) {
           // Step 1: Get all recipes from the selected category
           const categoryRes = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
           const categoryData = await categoryRes.json();
           const categoryRecipes = categoryData.meals || [];
           
           // Step 2: Search within category recipes by name
-          // Since API doesn't support category + search together, we filter client-side
           const searchLower = searchTerm.toLowerCase();
           result = categoryRecipes.filter(recipe => 
             recipe.strMeal.toLowerCase().includes(searchLower)
@@ -97,42 +152,58 @@ function App() {
             result = mergedResults;
           } catch (error) {
             console.error('Error fetching search results:', error);
-            // Use category-only results if search fails
           }
-        } 
-        // If only category is selected (no search term)
-        else if (currentCategory && !searchTerm) {
-          const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
-          const data = await res.json();
-          result = data.meals || [];
-        } 
-        // If only search term is provided (no category filter)
-        else if (searchTerm && !currentCategory) {
+        } else if (searchTerm && !currentCategory) {
           const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
           const data = await res.json();
           result = data.meals || [];
-        } 
-        // Default: show all recipes (home view)
-        else {
+        } else {
           const res = await fetch(`${API_BASE_URL}/search.php?s=`);
           const data = await res.json();
           result = data.meals || [];
         }
       }
       
-      setRecipes(result.filter(Boolean));
+      setRecipes(result);
     }
     
     fetchRecipes();
-  }, [currentView, currentCategory, searchTerm, favorites, cart]);
+  }, [currentView, currentCategory, favorites, cart]); // Removed searchTerm from dependencies
+
+  // New useEffect for context-aware filtering
+  useEffect(() => {
+    if (currentView === 'favorites' || currentView === 'cart') {
+      // Apply contextual search for favorites and cart
+      const filtered = ContextualSearchManager.searchInContext(recipes, searchTerm, currentView);
+      setFilteredRecipes(filtered);
+    } else {
+      // For other views, handle search through API calls
+      if (searchTerm && !currentCategory) {
+        // Global search
+        fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`)
+          .then(res => res.json())
+          .then(data => {
+            const result = data.meals || [];
+            setRecipes(result);
+            setFilteredRecipes(result);
+          });
+      } else if (searchTerm && currentCategory) {
+        // Category-specific search (handled in main useEffect)
+        setFilteredRecipes(recipes);
+      } else {
+        // No search term
+        setFilteredRecipes(recipes);
+      }
+    }
+  }, [searchTerm, recipes, currentView, currentCategory]);
 
   // Sync favorites/cart to localStorage
   useEffect(() => { setLocal('favorites', favorites); }, [favorites]);
   useEffect(() => { setLocal('cart', cart); }, [cart]);
 
-  // Pagination logic
-  const paginatedRecipes = recipes.slice((currentPage-1)*RECIPES_PER_PAGE, currentPage*RECIPES_PER_PAGE);
-  const totalPages = Math.ceil(recipes.length / RECIPES_PER_PAGE);
+  // Pagination logic - use filteredRecipes instead of recipes
+  const paginatedRecipes = filteredRecipes.slice((currentPage-1)*RECIPES_PER_PAGE, currentPage*RECIPES_PER_PAGE);
+  const totalPages = Math.ceil(filteredRecipes.length / RECIPES_PER_PAGE);
 
   // Handlers
   const handleFavorite = (recipe) => {
@@ -183,9 +254,8 @@ function App() {
   const handleViewChange = (view) => {
     setCurrentView(view);
     setCurrentPage(1);
-    // Keep search term and category when changing views
-    // This allows users to maintain their search context
-    if (view !== 'search' && view !== 'category') {
+    // Clear search when changing to non-contextual views
+    if (view === 'home') {
       setSearchTerm('');
       setCurrentCategory(null);
     }
@@ -198,43 +268,50 @@ function App() {
     
     // Update view based on category and search term
     if (newCategory && searchTerm) {
-      // Category + search: stay in search view but filter by category
       setCurrentView('search');
     } else if (newCategory && !searchTerm) {
-      // Category only: switch to category view
       setCurrentView('category');
     } else if (!newCategory && searchTerm) {
-      // Search only: stay in search view
       setCurrentView('search');
     } else {
-      // Neither: go to home view
       setCurrentView('home');
     }
     
     setCurrentPage(1);
   };
 
-  // UPDATED: Search handler with category-specific search logic
+  // UPDATED: Search handler with context-aware logic
   const handleSearch = (term) => {
     setSearchTerm(term);
+    setCurrentPage(1);
     
-    // Update view based on search term and category
-    if (term && currentCategory) {
-      // Search within category: stay in search view
-      setCurrentView('search');
-    } else if (term && !currentCategory) {
-      // Global search: switch to search view
-      setCurrentView('search');
-    } else if (!term && currentCategory) {
-      // No search but category selected: switch to category view
-      setCurrentView('category');
-    } else {
-      // No search and no category: go to home view
-      setCurrentView('home');
+    // For favorites and cart views, don't change the view - just filter in context
+    if (currentView === 'favorites' || currentView === 'cart') {
+      return; // Stay in the same view, filtering will happen in useEffect
     }
     
-    setCurrentPage(1);
+    // For other views, update view based on search term and category
+    if (term && currentCategory) {
+      setCurrentView('search');
+    } else if (term && !currentCategory) {
+      setCurrentView('search');
+    } else if (!term && currentCategory) {
+      setCurrentView('category');
+    } else {
+      setCurrentView('home');
+    }
   };
+
+  // Get search placeholder based on current context
+  const searchPlaceholder = ContextualSearchManager.getSearchPlaceholder(currentView);
+  
+  // Get results message
+  const resultsMessage = ContextualSearchManager.getResultsMessage(
+    recipes.length, 
+    filteredRecipes.length, 
+    searchTerm, 
+    currentView
+  );
 
   return (
     <div className="app-container">
@@ -246,9 +323,23 @@ function App() {
           currentCategory={currentCategory}
           setCurrentCategory={handleCategoryChange}
           categories={categories}
+          placeholder={searchPlaceholder} // Pass dynamic placeholder
         />
+        
+        {/* Show results message */}
+        {searchTerm && (
+          <div className="search-results-message" style={{ 
+            padding: '10px 20px', 
+            fontSize: '14px', 
+            color: '#666',
+            borderBottom: '1px solid #eee' 
+          }}>
+            {resultsMessage}
+          </div>
+        )}
+        
         <RecipeList
-          recipes={paginatedRecipes}
+          recipes={paginatedRecipes} // Using filtered and paginated recipes
           favorites={favorites}
           cart={cart}
           onFavorite={handleFavorite}
