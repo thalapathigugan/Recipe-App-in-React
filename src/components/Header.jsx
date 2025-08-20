@@ -15,11 +15,13 @@ function Header({ cart, onViewChange }) {
             </a>
             </div>
             <div className="nav-view-buttons">
-            <button type="button" className="view-favorites-btn" onClick={() => onViewChange('favorites')}>View Favorites</button>
-            <button type="button" className="view-cart-btn" onClick={() => onViewChange('cart')}>
-                View Cart
-                <span className="cart-count-badge">{cartCount > 0 ? cartCount : ''}</span>
-            </button>
+                <button type="button" className="view-favorites-btn" onClick={() => onViewChange('favorites')}>View Favorites</button>
+                <button type="button" className="view-cart-btn" onClick={() => onViewChange('cart')}>
+                    View Cart
+                    <span className="cart-count-badge">
+                        {cartCount > 0 ? cartCount : ''}
+                    </span>
+                </button>
             </div>
         </nav>
         </header>

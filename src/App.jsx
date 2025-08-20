@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Pagination from './components/Pagination';
 import RecipeDetails from './components/RecipeDetails';
@@ -7,7 +6,6 @@ import MobileBottomBar from './components/MobileBottomBar';
 import Header from './components/Header';
 import SearchBar from './components/SearchBar';
 import RecipeList from './components/RecipeList';
-
 
 const API_BASE_URL = 'https://www.themealdb.com/api/json/v1/1';
 const RECIPES_PER_PAGE = 20;
@@ -19,6 +17,7 @@ function getLocal(key, fallback) {
     return fallback;
   }
 }
+
 function setLocal(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
@@ -42,10 +41,11 @@ function App() {
       .then(data => setCategories(data.categories || []));
   }, []);
 
-  // Fetch recipes based on view/search/category
+  // Fetch recipes based on view/search/category with category-specific search logic
   useEffect(() => {
     async function fetchRecipes() {
       let result = [];
+      
       if (currentView === 'favorites') {
         result = favorites;
       } else if (currentView === 'cart') {
@@ -59,21 +59,70 @@ function App() {
           return data.meals ? data.meals[0] : null;
         }));
         result = recipes;
-      } else if (currentView === 'category' && currentCategory) {
-        const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
-        const data = await res.json();
-        result = data.meals || [];
-      } else if (currentView === 'search' && searchTerm) {
-        const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
-        const data = await res.json();
-        result = data.meals || [];
       } else {
-        const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-        const data = await res.json();
-        result = data.meals || [];
+        // CATEGORY-SPECIFIC SEARCH LOGIC
+        // If both category and search term are present, search within the category
+        if (currentCategory && searchTerm) {
+          // Step 1: Get all recipes from the selected category
+          const categoryRes = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
+          const categoryData = await categoryRes.json();
+          const categoryRecipes = categoryData.meals || [];
+          
+          // Step 2: Search within category recipes by name
+          // Since API doesn't support category + search together, we filter client-side
+          const searchLower = searchTerm.toLowerCase();
+          result = categoryRecipes.filter(recipe => 
+            recipe.strMeal.toLowerCase().includes(searchLower)
+          );
+          
+          // Optional: Also fetch search results and filter by category for more comprehensive results
+          try {
+            const searchRes = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
+            const searchData = await searchRes.json();
+            const searchRecipes = searchData.meals || [];
+            
+            // Filter search results to only include recipes from the selected category
+            const categoryFilteredSearch = searchRecipes.filter(recipe => 
+              recipe.strCategory === currentCategory
+            );
+            
+            // Merge and deduplicate results
+            const mergedResults = [...result];
+            categoryFilteredSearch.forEach(searchRecipe => {
+              if (!mergedResults.some(recipe => recipe.idMeal === searchRecipe.idMeal)) {
+                mergedResults.push(searchRecipe);
+              }
+            });
+            
+            result = mergedResults;
+          } catch (error) {
+            console.error('Error fetching search results:', error);
+            // Use category-only results if search fails
+          }
+        } 
+        // If only category is selected (no search term)
+        else if (currentCategory && !searchTerm) {
+          const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
+          const data = await res.json();
+          result = data.meals || [];
+        } 
+        // If only search term is provided (no category filter)
+        else if (searchTerm && !currentCategory) {
+          const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
+          const data = await res.json();
+          result = data.meals || [];
+        } 
+        // Default: show all recipes (home view)
+        else {
+          const res = await fetch(`${API_BASE_URL}/search.php?s=`);
+          const data = await res.json();
+          result = data.meals || [];
+        }
       }
+      
       setRecipes(result.filter(Boolean));
     }
+    
     fetchRecipes();
   }, [currentView, currentCategory, searchTerm, favorites, cart]);
 
@@ -94,6 +143,7 @@ function App() {
       return [...prev, recipe];
     });
   };
+
   const handleCartAdd = (recipe) => {
     setCart(prev => {
       const qty = (prev[recipe.idMeal]?.qty || 0) + 1;
@@ -101,6 +151,7 @@ function App() {
     });
     setToastMsg('Added to Cart');
   };
+
   const handleCartRemove = (recipe) => {
     setCart(prev => {
       const qty = (prev[recipe.idMeal]?.qty || 0) - 1;
@@ -110,6 +161,7 @@ function App() {
     });
     setToastMsg('Removed from Cart');
   };
+
   const handleViewRecipe = async (recipe) => {
     // If recipe has instructions, it's already full details
     if (recipe.strInstructions) {
@@ -123,23 +175,64 @@ function App() {
       }
     }
   };
+
   const handleCloseRecipe = () => setSelectedRecipe(null);
+  
   const handlePageChange = (page) => setCurrentPage(page);
+
   const handleViewChange = (view) => {
     setCurrentView(view);
     setCurrentPage(1);
-    setSearchTerm('');
-    setCurrentCategory(null);
+    // Keep search term and category when changing views
+    // This allows users to maintain their search context
+    if (view !== 'search' && view !== 'category') {
+      setSearchTerm('');
+      setCurrentCategory(null);
+    }
   };
+
+  // UPDATED: Category change handler with category-specific search logic
   const handleCategoryChange = (cat) => {
-    setCurrentCategory(cat === '__all__' ? null : cat);
-    setCurrentView(cat ? 'category' : 'home');
+    const newCategory = cat === '__all__' ? null : cat;
+    setCurrentCategory(newCategory);
+    
+    // Update view based on category and search term
+    if (newCategory && searchTerm) {
+      // Category + search: stay in search view but filter by category
+      setCurrentView('search');
+    } else if (newCategory && !searchTerm) {
+      // Category only: switch to category view
+      setCurrentView('category');
+    } else if (!newCategory && searchTerm) {
+      // Search only: stay in search view
+      setCurrentView('search');
+    } else {
+      // Neither: go to home view
+      setCurrentView('home');
+    }
+    
     setCurrentPage(1);
-    setSearchTerm('');
   };
+
+  // UPDATED: Search handler with category-specific search logic
   const handleSearch = (term) => {
     setSearchTerm(term);
-    setCurrentView(term ? 'search' : (currentCategory ? 'category' : 'home'));
+    
+    // Update view based on search term and category
+    if (term && currentCategory) {
+      // Search within category: stay in search view
+      setCurrentView('search');
+    } else if (term && !currentCategory) {
+      // Global search: switch to search view
+      setCurrentView('search');
+    } else if (!term && currentCategory) {
+      // No search but category selected: switch to category view
+      setCurrentView('category');
+    } else {
+      // No search and no category: go to home view
+      setCurrentView('home');
+    }
+    
     setCurrentPage(1);
   };
 

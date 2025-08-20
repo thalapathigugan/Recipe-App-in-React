@@ -22,7 +22,7 @@ button,
 }
 
 body{
-  background: linear-gradient(to right, #355C7D, #6C5B7B, #C06C84);
+  background: radial-gradient(circle at 50% 50%, #f7fbff, #e3f0ff);
   color: #23406e;
   transition: all 0.3s ease;
 }
@@ -238,16 +238,19 @@ form button[type="submit"]{
   left:50%;
   transform: translate(-50%, -50%);
   -webkit-transform: translate(-50%, -50%);
-  background: #fff;
+  background-size: 100% 100%;
+  background-position: 0px 0px,0px 0px,0px 0px,0px 0px,0px 0px,0px 0px,0px 0px,0px 0px,0px 0px,0px 0px,0px 0px;
+  background-image: radial-gradient(18% 28% at 24% 50%, #CEFAFFFF 7%, #073AFF00 100%),radial-gradient(18% 28% at 18% 71%, #FFFFFF59 6%, #073AFF00 100%),radial-gradient(70% 53% at 36% 76%, #73F2FFFF 0%, #073AFF00 100%),radial-gradient(42% 53% at 15% 94%, #FFFFFFFF 7%, #073AFF00 100%),radial-gradient(42% 53% at 34% 72%, #FFFFFFFF 7%, #073AFF00 100%),radial-gradient(18% 28% at 35% 87%, #FFFFFFFF 7%, #073AFF00 100%),radial-gradient(31% 43% at 7% 98%, #FFFFFFFF 24%, #073AFF00 100%),radial-gradient(21% 37% at 72% 23%, #e0edbd9c 24%, #073AFF00 100%),radial-gradient(35% 56% at 91% 74%, #A4D7FDFF 9%, #073AFF00 100%),radial-gradient(74% 86% at 67% 38%, #ABEDC9F5 24%, #073AFF00 100%),linear-gradient(148deg, #8EC2E8FF 16%, #8EC2E8FF 27%, #4C00FCFF 64%, #8EC2E8FF 90%, #8EC2E8FF 91%, #8EC2E8FF 94%);
   border: 2px solid #b3d8fd;
   border-radius: 18px;
   width: 80%;
-  height: 70%;
+  min-height: 60%;
+  max-height: 80%;
   font-size: 20px;
   transition: all 0.5s ease-in-out;
   overflow-y: scroll;
   color: #23406e;
-  box-shadow: 0 8px 32px rgba(52, 152, 219, 0.10);
+  box-shadow: 0px 0px 80px 10px rgb(182, 182, 182);
 }
 
 .recipe-details-content{
