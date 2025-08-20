@@ -112,31 +112,76 @@ function App() {
         }));
         result = recipes.filter(Boolean);
       } else {
-        // For home/search/category views, only fetch from API if no search term
-        // or if we're not in favorites/cart context
-        if (currentCategory && !searchTerm) {
+        // For home/search/category views
+        if (currentView === 'home' && !currentCategory && !searchTerm) {
+          // HOME PAGE: Fetch recipes from multiple categories to show variety
+          try {
+            const categoryList = ['Beef', 'Chicken', 'Dessert', 'Pasta', 'Seafood', 'Vegetarian', 'Breakfast', 'Side'];
+            const allRecipes = [];
+            
+            // Fetch recipes from multiple categories for home page variety
+            await Promise.all(categoryList.map(async (category) => {
+              try {
+                const res = await fetch(`${API_BASE_URL}/filter.php?c=${category}`);
+                const data = await res.json();
+                const categoryRecipes = data.meals || [];
+                
+                // Take first 15 recipes from each category to ensure variety
+                allRecipes.push(...categoryRecipes.slice(0, 15));
+              } catch (error) {
+                console.error(`Error fetching ${category} recipes:`, error);
+              }
+            }));
+            
+            // Shuffle the results to mix different categories
+            result = allRecipes.sort(() => Math.random() - 0.5);
+            
+            // If we don't get enough recipes, fallback to search all
+            if (result.length < 50) {
+              console.log('Fallback: Using search API for home page');
+              const res = await fetch(`${API_BASE_URL}/search.php?s=`);
+              const data = await res.json();
+              const searchResults = data.meals || [];
+              
+              // Merge and deduplicate
+              const mergedResults = [...result];
+              searchResults.forEach(recipe => {
+                if (!mergedResults.some(r => r.idMeal === recipe.idMeal)) {
+                  mergedResults.push(recipe);
+                }
+              });
+              
+              result = mergedResults;
+            }
+          } catch (error) {
+            console.error('Error fetching home page recipes:', error);
+            // Final fallback
+            const res = await fetch(`${API_BASE_URL}/search.php?s=`);
+            const data = await res.json();
+            result = data.meals || [];
+          }
+        } else if (currentCategory && !searchTerm) {
+          // Category view without search
           const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
           const data = await res.json();
           result = data.meals || [];
         } else if (currentCategory && searchTerm) {
-          // Step 1: Get all recipes from the selected category
+          // Category-specific search
           const categoryRes = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
           const categoryData = await categoryRes.json();
           const categoryRecipes = categoryData.meals || [];
           
-          // Step 2: Search within category recipes by name
           const searchLower = searchTerm.toLowerCase();
           result = categoryRecipes.filter(recipe => 
             recipe.strMeal.toLowerCase().includes(searchLower)
           );
           
-          // Optional: Also fetch search results and filter by category for more comprehensive results
+          // Also fetch search results and filter by category for more comprehensive results
           try {
             const searchRes = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
             const searchData = await searchRes.json();
             const searchRecipes = searchData.meals || [];
             
-            // Filter search results to only include recipes from the selected category
             const categoryFilteredSearch = searchRecipes.filter(recipe => 
               recipe.strCategory === currentCategory
             );
@@ -154,10 +199,12 @@ function App() {
             console.error('Error fetching search results:', error);
           }
         } else if (searchTerm && !currentCategory) {
+          // Global search without category
           const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
           const data = await res.json();
           result = data.meals || [];
         } else {
+          // Default fallback
           const res = await fetch(`${API_BASE_URL}/search.php?s=`);
           const data = await res.json();
           result = data.meals || [];
