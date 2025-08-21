@@ -1,222 +1,22 @@
+
 import React, { useState, useEffect } from 'react';
 import Pagination from './components/Pagination';
-import RecipeDetails from './components/RecipeDetails';
+import RecipeDetailsModal from './components/RecipeDetailsModal';
 import Toaster from './components/Toaster';
 import MobileBottomBar from './components/MobileBottomBar';
 import Header from './components/Header';
 import SearchBar from './components/SearchBar';
 import RecipeList from './components/RecipeList';
+import ContextualSearchManager from './utils/ContextualSearchManager';
+import HomePageRecipeManager from './utils/HomePageRecipeManager';
+import { getLocal, setLocal } from './utils/localStorage';
 
-const API_BASE_URL = 'https://www.themealdb.com/api/json/v1/1';
 const RECIPES_PER_PAGE = 20;
-const MIN_HOME_RECIPES = 120; // Minimum 6 pages * 20 recipes per page
-
-function getLocal(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key)) || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function setLocal(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-// Context-aware search utility class
-class ContextualSearchManager {
-  static searchInContext(items, searchTerm, currentView) {
-    if (!searchTerm || searchTerm.trim() === '') {
-      return items; // Return all items if no search term
-    }
-
-    const query = searchTerm.toLowerCase().trim();
-
-    return items.filter(recipe => {
-      const searchableFields = [
-        recipe.strMeal,
-        recipe.strCategory,
-        recipe.strArea,
-        recipe.strTags,
-        recipe.strInstructions
-      ].filter(Boolean); // Remove undefined/null values
-
-      return searchableFields.some(field =>
-        field.toLowerCase().includes(query)
-      );
-    });
-  }
-
-  static getSearchPlaceholder(currentView) {
-    switch (currentView) {
-      case 'cart':
-        return 'Search items in your cart...';
-      case 'favorites':
-        return 'Search your favorite recipes...';
-      default:
-        return 'Search recipes...';
-    }
-  }
-
-  static getResultsMessage(totalResults, filteredResults, searchTerm, currentView) {
-    const context = currentView === 'cart' ? 'cart' :
-                    currentView === 'favorites' ? 'favorites' : 'recipes';
-    
-    if (!searchTerm || searchTerm.trim() === '') {
-      return `Showing all ${context} (${totalResults})`;
-    }
-    
-    if (filteredResults === 0) {
-      return `No results found in ${context} for "${searchTerm}"`;
-    }
-    
-    return `Found ${filteredResults} result(s) in ${context} for "${searchTerm}"`;
-  }
-}
-
-// Fixed home page recipe fetcher
-class HomePageRecipeManager {
-  // Fixed list of categories to ensure consistent results
-  static FIXED_CATEGORIES = [
-    'Beef', 'Chicken', 'Pork', 'Seafood', 'Vegetarian', 'Lamb',
-    'Pasta', 'Dessert', 'Breakfast', 'Side', 'Starter', 'Vegan'
-  ];
-
-  // Fixed search terms to get consistent recipe sets
-  static FIXED_SEARCH_TERMS = [
-    'a', 'e', 'i', 'o', 'u', 'b', 'c', 'd', 'f', 'g', 'h', 'l', 'm', 'n', 'p', 'r', 's', 't'
-  ];
-
-  static async fetchFixedHomeRecipes() {
-    const allRecipes = [];
-    const seenIds = new Set();
-
-    try {
-      // First, fetch from fixed categories (consistent order)
-      for (let i = 0; i < this.FIXED_CATEGORIES.length; i++) {
-        const category = this.FIXED_CATEGORIES[i];
-        try {
-          const res = await fetch(`${API_BASE_URL}/filter.php?c=${category}`);
-          const data = await res.json();
-          const categoryRecipes = data.meals || [];
-          
-          // Take recipes in a consistent manner (not random)
-          // Take every 2nd recipe to get variety but maintain consistency
-          const selectedRecipes = categoryRecipes.filter((recipe, index) => {
-            if (index % 2 === 0 && !seenIds.has(recipe.idMeal)) {
-              seenIds.add(recipe.idMeal);
-              return true;
-            }
-            return false;
-          }).slice(0, 12); // Take up to 12 from each category
-          
-          // FORCE category information onto each recipe with validation
-          const enrichedRecipes = selectedRecipes.map(recipe => {
-            const recipeWithCategory = {
-              ...recipe,
-              strCategory: category // Explicitly set the category
-            };
-            
-            return recipeWithCategory;
-          });
-          
-          allRecipes.push(...enrichedRecipes);
-          
-          // Break early if we have enough recipes
-          if (allRecipes.length >= MIN_HOME_RECIPES) break;
-          
-        } catch (error) {
-          console.error(`Error fetching ${category} recipes:`, error);
-        }
-      }
-
-      // If still need more recipes, fetch using fixed search terms
-      if (allRecipes.length < MIN_HOME_RECIPES) {
-        for (let i = 0; i < this.FIXED_SEARCH_TERMS.length && allRecipes.length < MIN_HOME_RECIPES; i++) {
-          const searchTerm = this.FIXED_SEARCH_TERMS[i];
-          try {
-            const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
-            const data = await res.json();
-            const searchRecipes = data.meals || [];
-            
-            // Add unique recipes (search API returns full details including category)
-            searchRecipes.forEach(recipe => {
-              if (!seenIds.has(recipe.idMeal) && allRecipes.length < MIN_HOME_RECIPES) {
-                seenIds.add(recipe.idMeal);
-                allRecipes.push(recipe);
-              }
-            });
-          } catch (error) {
-            console.error(`Error fetching search results for "${searchTerm}":`, error);
-          }
-        }
-      }
-
-      // If still need more, do a final fallback search
-      if (allRecipes.length < MIN_HOME_RECIPES) {
-        try {
-          const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-          const data = await res.json();
-          const fallbackRecipes = data.meals || [];
-          
-          fallbackRecipes.forEach(recipe => {
-            if (!seenIds.has(recipe.idMeal) && allRecipes.length < MIN_HOME_RECIPES) {
-              seenIds.add(recipe.idMeal);
-              allRecipes.push(recipe);
-            }
-          });
-        } catch (error) {
-          console.error('Error fetching fallback recipes:', error);
-        }
-      }
-
-      // Sort alphabetically for consistency
-      const finalRecipes = allRecipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
-      
-      console.log(`Fetched ${finalRecipes.length} home recipes`);
-      
-      return finalRecipes;
-
-    } catch (error) {
-      console.error('Error in fetchFixedHomeRecipes:', error);
-      // Final fallback
-      try {
-        const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-        const data = await res.json();
-        const recipes = data.meals || [];
-        return recipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
-      } catch (fallbackError) {
-        console.error('Final fallback failed:', fallbackError);
-        return [];
-      }
-    }
-  }
-
-  // Helper function to fetch recipes with full category details for category view
-  static async fetchCategoryRecipesWithDetails(category) {
-    try {
-      // First get the list of recipes in the category
-      const res = await fetch(`${API_BASE_URL}/filter.php?c=${category}`);
-      const data = await res.json();
-      const categoryRecipes = data.meals || [];
-
-      // For category view, FORCE category info onto each recipe
-      const enrichedRecipes = categoryRecipes.map(recipe => ({
-        ...recipe,
-        strCategory: category // Explicitly set the category
-      }));
-
-      return enrichedRecipes;
-
-    } catch (error) {
-      console.error(`Error fetching category recipes for ${category}:`, error);
-      return [];
-    }
-  }
-}
+const API_BASE_URL = 'https://www.themealdb.com/api/json/v1/1';
+const MIN_HOME_RECIPES = 120;
 
 function App() {
-  const [recipes, setRecipes] = useState([]);
+  // recipes state removed, use filteredRecipes only
   const [filteredRecipes, setFilteredRecipes] = useState([]);
   const [categories, setCategories] = useState([]);
   const [currentView, setCurrentView] = useState('home');
@@ -383,7 +183,7 @@ function App() {
         setIsSearching(false);
       }
       
-      setRecipes(result);
+  // setRecipes removed, use only setFilteredRecipes
       setFilteredRecipes(result); // Set both at the same time for simplicity
     }
     
@@ -625,7 +425,7 @@ function App() {
         )}
 
         {selectedRecipe && (
-          <RecipeDetails recipe={selectedRecipe} onClose={handleCloseRecipe} />
+          <RecipeDetailsModal recipe={selectedRecipe} onClose={handleCloseRecipe} />
         )}
         
         {/* Render Toaster only when there's a message */}
