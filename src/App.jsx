@@ -267,8 +267,26 @@ function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
-  const [homeRecipes, setHomeRecipes] = useState([]); // Cache for home page recipes
+  const [toastKey, setToastKey] = useState(0);
+  const [homeRecipes, setHomeRecipes] = useState([]);
   const [isLoadingHome, setIsLoadingHome] = useState(false);
+
+  // Helper function to show toast messages with proper reset
+  const showToast = (message) => {
+    // First clear any existing toast
+    setToastMsg(null);
+    setToastKey(prev => prev + 1);
+    
+    // Then show the new toast after a brief delay
+    setTimeout(() => {
+      setToastMsg(message);
+    }, 10);
+  };
+
+  // Helper function to hide toast
+  const hideToast = () => {
+    setToastMsg(null);
+  };
 
   // Fetch categories on mount
   useEffect(() => {
@@ -444,7 +462,11 @@ function App() {
   const handleFavorite = (recipe) => {
     setFavorites(prev => {
       const exists = prev.some(r => r.idMeal === recipe.idMeal);
-      setToastMsg(exists ? 'Removed from Favorites' : 'Added to Favorites');
+      const message = exists ? 'Removed from Favorites' : 'Added to Favorites';
+      
+      // Show toast immediately
+      showToast(message);
+      
       if (exists) return prev.filter(r => r.idMeal !== recipe.idMeal);
       return [...prev, recipe];
     });
@@ -455,7 +477,9 @@ function App() {
       const qty = (prev[recipe.idMeal]?.qty || 0) + 1;
       return { ...prev, [recipe.idMeal]: { recipe, qty } };
     });
-    setToastMsg('Added to Cart');
+    
+    // Show toast after state update
+    showToast('Added to Cart');
   };
 
   const handleCartRemove = (recipe) => {
@@ -465,7 +489,9 @@ function App() {
       const { [recipe.idMeal]: _, ...rest } = prev;
       return rest;
     });
-    setToastMsg('Removed from Cart');
+    
+    // Show toast after state update
+    showToast('Removed from Cart');
   };
 
   const handleViewRecipe = async (recipe) => {
@@ -600,7 +626,16 @@ function App() {
         {selectedRecipe && (
           <RecipeDetails recipe={selectedRecipe} onClose={handleCloseRecipe} />
         )}
-        <Toaster message={toastMsg} onClose={() => setToastMsg(null)} />
+        
+        {/* Render Toaster only when there's a message */}
+        {toastMsg && (
+          <Toaster 
+            key={toastKey} 
+            message={toastMsg} 
+            onClose={hideToast} 
+          />
+        )}
+        
         <MobileBottomBar onViewChange={handleViewChange} />
       </main>
     </div>
