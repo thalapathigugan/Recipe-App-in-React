@@ -9,7 +9,7 @@ import RecipeList from './components/RecipeList';
 
 const API_BASE_URL = 'https://www.themealdb.com/api/json/v1/1';
 const RECIPES_PER_PAGE = 20;
-const MIN_HOME_RECIPES = 120; // Minimum 8 pages * 20 recipes per page
+const MIN_HOME_RECIPES = 120; // Minimum 6 pages * 20 recipes per page
 
 function getLocal(key, fallback) {
   try {
@@ -87,33 +87,6 @@ class HomePageRecipeManager {
     'a', 'e', 'i', 'o', 'u', 'b', 'c', 'd', 'f', 'g', 'h', 'l', 'm', 'n', 'p', 'r', 's', 't'
   ];
 
-  // Helper function to ensure recipes have category information
-  static async enrichRecipeWithCategory(recipe, knownCategory = null) {
-    // If recipe already has category info, return as is
-    if (recipe.strCategory) {
-      return recipe;
-    }
-
-    // If we know the category, add it
-    if (knownCategory) {
-      return { ...recipe, strCategory: knownCategory };
-    }
-
-    // Otherwise, fetch full details to get category
-    try {
-      const res = await fetch(`${API_BASE_URL}/lookup.php?i=${recipe.idMeal}`);
-      const data = await res.json();
-      if (data.meals && data.meals[0]) {
-        return data.meals[0];
-      }
-    } catch (error) {
-      console.error(`Error fetching details for recipe ${recipe.idMeal}:`, error);
-    }
-
-    // Return original recipe as fallback
-    return recipe;
-  }
-
   static async fetchFixedHomeRecipes() {
     const allRecipes = [];
     const seenIds = new Set();
@@ -143,11 +116,6 @@ class HomePageRecipeManager {
               ...recipe,
               strCategory: category // Explicitly set the category
             };
-            
-            // Debug log to verify category is set
-            if (!recipeWithCategory.strCategory) {
-              console.warn(`Failed to set category for recipe: ${recipe.strMeal}`);
-            }
             
             return recipeWithCategory;
           });
@@ -202,18 +170,10 @@ class HomePageRecipeManager {
         }
       }
 
-      // Debug log to check final results
+      // Sort alphabetically for consistency
       const finalRecipes = allRecipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
       
-      // Verify all recipes have categories
-      const recipesWithoutCategory = finalRecipes.filter(recipe => !recipe.strCategory);
-      if (recipesWithoutCategory.length > 0) {
-        console.warn(`${recipesWithoutCategory.length} recipes without categories:`, 
-          recipesWithoutCategory.map(r => r.strMeal));
-      }
-      
-      console.log(`Fetched ${finalRecipes.length} home recipes with categories:`, 
-        finalRecipes.slice(0, 3).map(r => `${r.strMeal} (${r.strCategory})`));
+      console.log(`Fetched ${finalRecipes.length} home recipes`);
       
       return finalRecipes;
 
@@ -270,7 +230,7 @@ function App() {
   const [toastKey, setToastKey] = useState(0);
   const [homeRecipes, setHomeRecipes] = useState([]);
   const [isLoadingHome, setIsLoadingHome] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Helper function to show toast messages with proper reset
   const showToast = (message) => {
@@ -304,43 +264,25 @@ function App() {
       const cacheTimestamp = getLocal('homeRecipesTimestamp', 0);
       const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
       
-      // Check if cached recipes have proper category information
-      const hasValidCategories = cachedHomeRecipes && cachedHomeRecipes.length > 0 && 
-        cachedHomeRecipes.every(recipe => recipe.strCategory && recipe.strCategory !== 'N/A');
-      
-      // Use cache if it's less than 1 hour old, has enough recipes, AND has valid categories
+      // Use cache if it's less than 1 hour old and has enough recipes
       if (cachedHomeRecipes && 
           cachedHomeRecipes.length >= MIN_HOME_RECIPES &&
-          (Date.now() - cacheTimestamp < oneHour) &&
-          hasValidCategories) {
+          (Date.now() - cacheTimestamp < oneHour)) {
         setHomeRecipes(cachedHomeRecipes);
         return;
       }
 
-      // Fetch fresh recipes (cache is invalid or doesn't have categories)
+      // Fetch fresh recipes
       setIsLoadingHome(true);
       try {
         const fixedRecipes = await HomePageRecipeManager.fetchFixedHomeRecipes();
+        setHomeRecipes(fixedRecipes);
         
-        // Double-check that all recipes have categories before setting
-        const recipesWithCategories = fixedRecipes.map(recipe => {
-          if (!recipe.strCategory || recipe.strCategory === 'N/A') {
-            console.warn(`Recipe ${recipe.strMeal} missing category, attempting to fix...`);
-            // Try to determine category from cached data or set a default
-            return { ...recipe, strCategory: 'General' };
-          }
-          return recipe;
-        });
-        
-        setHomeRecipes(recipesWithCategories);
-        
-        // Cache the results with categories
-        setLocal('homeRecipes', recipesWithCategories);
+        // Cache the results
+        setLocal('homeRecipes', fixedRecipes);
         setLocal('homeRecipesTimestamp', Date.now());
       } catch (error) {
         console.error('Error fetching home recipes:', error);
-        // Clear invalid cache and try a basic fetch
-        setLocal('homeRecipes', []);
         setHomeRecipes([]);
       } finally {
         setIsLoadingHome(false);
@@ -353,110 +295,106 @@ function App() {
   // Fetch recipes based on view/search/category
   useEffect(() => {
     async function fetchRecipes() {
-      setIsLoading(true);
+      setIsSearching(true);
       let result = [];
-      if (currentView === 'favorites') {
-        result = favorites;
-      } else if (currentView === 'cart') {
-        // Fetch full details for each cart item
-        const ids = Object.keys(cart);
-        const recipes = await Promise.all(ids.map(async id => {
-          const r = cart[id].recipe;
-          if (r.strInstructions) return r;
-          const res = await fetch(`${API_BASE_URL}/lookup.php?i=${id}`);
-          const data = await res.json();
-          return data.meals ? data.meals[0] : null;
-        }));
-        result = recipes;
-      } else {
-        // CATEGORY-SPECIFIC SEARCH LOGIC
-        if (currentCategory && searchTerm) {
-          // Step 1: Get all recipes from the selected category
-          const categoryRes = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
-          const categoryData = await categoryRes.json();
-          const categoryRecipes = categoryData.meals || [];
-          // Step 2: Search within category recipes by name
-          const searchLower = searchTerm.toLowerCase();
-          result = categoryRecipes.filter(recipe =>
-            recipe.strMeal.toLowerCase().includes(searchLower)
-          );
-          // Optional: Also fetch search results and filter by category for more comprehensive results
-          try {
-            const searchRes = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
-            const searchData = await searchRes.json();
-            const searchRecipes = searchData.meals || [];
-            const categoryFilteredSearch = searchRecipes.filter(recipe =>
-              recipe.strCategory === currentCategory
-            );
-            // Merge and deduplicate results
-            const mergedResults = [...result];
-            categoryFilteredSearch.forEach(searchRecipe => {
-              if (!mergedResults.some(recipe => recipe.idMeal === searchRecipe.idMeal)) {
-                mergedResults.push(searchRecipe);
+      
+      try {
+        if (currentView === 'favorites') {
+          result = favorites;
+        } else if (currentView === 'cart') {
+          // Fetch full details for each cart item
+          const ids = Object.keys(cart);
+          const recipes = await Promise.all(ids.map(async id => {
+            const r = cart[id].recipe;
+            if (r.strInstructions) return r;
+            const res = await fetch(`${API_BASE_URL}/lookup.php?i=${id}`);
+            const data = await res.json();
+            return data.meals ? data.meals[0] : null;
+          }));
+          result = recipes.filter(Boolean);
+        } else if (currentView === 'home' && !currentCategory && !searchTerm) {
+          // HOME PAGE: Use fixed cached recipes
+          result = homeRecipes;
+        } else if (currentCategory && !searchTerm) {
+          // Category view without search
+          result = await HomePageRecipeManager.fetchCategoryRecipesWithDetails(currentCategory);
+        } else if (searchTerm) {
+          // Search operations
+          if (currentCategory) {
+            // CATEGORY-SPECIFIC SEARCH - This is the key fix
+            try {
+              // Get all recipes in the category first
+              const categoryRecipes = await HomePageRecipeManager.fetchCategoryRecipesWithDetails(currentCategory);
+              
+              // Then filter them by search term
+              const searchLower = searchTerm.toLowerCase();
+              const filteredResults = categoryRecipes.filter(recipe => 
+                recipe.strMeal.toLowerCase().includes(searchLower) ||
+                (recipe.strInstructions && recipe.strInstructions.toLowerCase().includes(searchLower)) ||
+                (recipe.strArea && recipe.strArea.toLowerCase().includes(searchLower)) ||
+                (recipe.strTags && recipe.strTags.toLowerCase().includes(searchLower))
+              );
+              
+              // Also try global search and filter by category as backup
+              try {
+                const searchRes = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
+                const searchData = await searchRes.json();
+                const globalSearchResults = (searchData.meals || []).filter(recipe => 
+                  recipe.strCategory === currentCategory
+                );
+                
+                // Merge results, avoiding duplicates
+                globalSearchResults.forEach(searchRecipe => {
+                  if (!filteredResults.some(recipe => recipe.idMeal === searchRecipe.idMeal)) {
+                    filteredResults.push(searchRecipe);
+                  }
+                });
+              } catch (globalSearchError) {
+                console.log('Global search fallback failed:', globalSearchError);
+                // Continue with just filtered results
               }
-            });
-            result = mergedResults;
-          } catch (error) {
-            console.error('Error fetching search results:', error);
+              
+              result = filteredResults;
+              
+            } catch (error) {
+              console.error('Category-specific search failed:', error);
+              result = []; // Explicitly set empty array on error
+            }
+          } else {
+            // GLOBAL SEARCH (no category selected)
+            try {
+              const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
+              const data = await res.json();
+              result = data.meals || [];
+            } catch (error) {
+              console.error('Global search failed:', error);
+              result = [];
+            }
           }
+        } else {
+          // Default fallback - use home recipes
+          result = homeRecipes;
         }
-        // If only category is selected (no search term)
-        else if (currentCategory && !searchTerm) {
-          const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
-          const data = await res.json();
-          result = data.meals || [];
-        }
-        // If only search term is provided (no category filter)
-        else if (searchTerm && !currentCategory) {
-          const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
-          const data = await res.json();
-          result = data.meals || [];
-        }
-        // Default: show all recipes (home view)
-        else {
-          const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-          const data = await res.json();
-          result = data.meals || [];
-        }
+        
+      } catch (error) {
+        console.error('Error in fetchRecipes:', error);
+        result = [];
+      } finally {
+        setIsSearching(false);
       }
-      setRecipes(result.filter(Boolean));
-      setIsLoading(false);
+      
+      setRecipes(result);
+      setFilteredRecipes(result); // Set both at the same time for simplicity
     }
+    
     fetchRecipes();
-  }, [currentView, currentCategory, searchTerm, favorites, cart]);
-
-  // Context-aware filtering
-  useEffect(() => {
-    if (currentView === 'favorites' || currentView === 'cart') {
-      // Apply contextual search for favorites and cart
-      const filtered = ContextualSearchManager.searchInContext(recipes, searchTerm, currentView);
-      setFilteredRecipes(filtered);
-    } else {
-      // For other views, handle search through API calls
-      if (searchTerm && !currentCategory) {
-        // Global search
-        fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`)
-          .then(res => res.json())
-          .then(data => {
-            const result = data.meals || [];
-            setRecipes(result);
-            setFilteredRecipes(result);
-          });
-      } else if (searchTerm && currentCategory) {
-        // Category-specific search (handled in main useEffect)
-        setFilteredRecipes(recipes);
-      } else {
-        // No search term
-        setFilteredRecipes(recipes);
-      }
-    }
-  }, [searchTerm, recipes, currentView, currentCategory]);
+  }, [currentView, currentCategory, searchTerm, favorites, cart, homeRecipes]);
 
   // Sync favorites/cart to localStorage
   useEffect(() => { setLocal('favorites', favorites); }, [favorites]);
   useEffect(() => { setLocal('cart', cart); }, [cart]);
 
-  // Pagination logic - use filteredRecipes instead of recipes
+  // Pagination logic - use filteredRecipes
   const paginatedRecipes = filteredRecipes.slice((currentPage-1)*RECIPES_PER_PAGE, currentPage*RECIPES_PER_PAGE);
   const totalPages = Math.ceil(filteredRecipes.length / RECIPES_PER_PAGE);
 
@@ -466,7 +404,6 @@ function App() {
       const exists = prev.some(r => r.idMeal === recipe.idMeal);
       const message = exists ? 'Removed from Favorites' : 'Added to Favorites';
       
-      // Show toast immediately
       showToast(message);
       
       if (exists) return prev.filter(r => r.idMeal !== recipe.idMeal);
@@ -480,7 +417,6 @@ function App() {
       return { ...prev, [recipe.idMeal]: { recipe, qty } };
     });
     
-    // Show toast after state update
     showToast('Added to Cart');
   };
 
@@ -492,7 +428,6 @@ function App() {
       return rest;
     });
     
-    // Show toast after state update
     showToast('Removed from Cart');
   };
 
@@ -517,8 +452,8 @@ function App() {
   const handleViewChange = (view) => {
     setCurrentView(view);
     setCurrentPage(1);
-    // Only clear search/category if leaving search/category views
-    if (view !== 'search' && view !== 'category') {
+    // Clear search when changing to non-contextual views
+    if (view === 'home') {
       setSearchTerm('');
       setCurrentCategory(null);
     }
@@ -527,6 +462,7 @@ function App() {
   const handleCategoryChange = (cat) => {
     const newCategory = cat === '__all__' ? null : cat;
     setCurrentCategory(newCategory);
+    
     // Update view based on category and search term
     if (newCategory && searchTerm) {
       setCurrentView('search');
@@ -537,12 +473,20 @@ function App() {
     } else {
       setCurrentView('home');
     }
+    
     setCurrentPage(1);
   };
 
   const handleSearch = (term) => {
     setSearchTerm(term);
-    // Update view based on search term and category
+    setCurrentPage(1);
+    
+    // For favorites and cart views, don't change the view - just filter in context
+    if (currentView === 'favorites' || currentView === 'cart') {
+      return; // Stay in the same view, filtering will happen in useEffect
+    }
+    
+    // For other views, update view based on search term and category
     if (term && currentCategory) {
       setCurrentView('search');
     } else if (term && !currentCategory) {
@@ -552,19 +496,42 @@ function App() {
     } else {
       setCurrentView('home');
     }
-    setCurrentPage(1);
   };
 
   // Get search placeholder based on current context
   const searchPlaceholder = ContextualSearchManager.getSearchPlaceholder(currentView);
-  
-  // Get results message
-  const resultsMessage = ContextualSearchManager.getResultsMessage(
-    recipes.length, 
-    filteredRecipes.length, 
-    searchTerm, 
-    currentView
-  );
+
+  // Determine what message to show
+  const getDisplayMessage = () => {
+    if (isLoadingHome && currentView === 'home') {
+      return { type: 'loading', message: 'Loading recipes...' };
+    }
+    
+    if (isSearching && searchTerm) {
+      return { type: 'loading', message: 'Searching...' };
+    }
+    
+    if (filteredRecipes.length === 0 && searchTerm) {
+      const context = currentCategory ? ` in ${currentCategory} category` : '';
+      return { 
+        type: 'no-results', 
+        message: `No recipes found${context} for "${searchTerm}"`,
+        showClearButton: true
+      };
+    }
+    
+    if (filteredRecipes.length === 0 && !searchTerm && currentCategory) {
+      return { 
+        type: 'no-results', 
+        message: `No recipes found in ${currentCategory} category`,
+        showClearButton: false
+      };
+    }
+    
+    return null;
+  };
+
+  const displayMessage = getDisplayMessage();
 
   return (
     <div className="app-container">
@@ -579,54 +546,94 @@ function App() {
           placeholder={searchPlaceholder}
         />
         
-        {/* Show results message */}
-        {searchTerm && (
-          <div className="search-results-message" style={{
-            padding: '10px 20px',
-            fontSize: '14px',
+        {/* Show search results info */}
+        {searchTerm && !displayMessage && (
+          <div className="search-results-message" style={{ 
+            padding: '10px 20px', 
+            fontSize: '14px', 
             color: '#666',
-            borderBottom: '1px solid #eee'
+            borderBottom: '1px solid #eee',
+            backgroundColor: 'transparent'
           }}>
-            {resultsMessage}
+            Found {filteredRecipes.length} result(s){currentCategory ? ` in ${currentCategory}` : ''} for "{searchTerm}"
           </div>
         )}
 
-        {/* Loading indicator for home page */}
-        {currentView === 'home' && isLoadingHome && (
-          <div style={{
-            padding: '40px 20px',
-            textAlign: 'center',
-            fontSize: '16px',
-            color: '#666'
+        {/* Show loading, no results, or recipe list */}
+        {displayMessage ? (
+          <div style={{ 
+            padding: '40px 20px', 
+            textAlign: 'center', 
+            fontSize: '16px', 
+            color: displayMessage.type === 'loading' ? '#666' : '#e74c3c'
           }}>
-            Loading recipes...
+            <div style={{ marginBottom: displayMessage.showClearButton ? '20px' : '0' }}>
+              {displayMessage.message}
+            </div>
+            {displayMessage.showClearButton && (
+              <div>
+                <button 
+                  onClick={() => setSearchTerm('')}
+                  style={{ 
+                    padding: '10px 20px', 
+                    backgroundColor: '#3498db', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '6px', 
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                  onMouseOver={(e) => e.target.style.backgroundColor = '#2980b9'}
+                  onMouseOut={(e) => e.target.style.backgroundColor = '#3498db'}
+                >
+                  Clear Search
+                </button>
+                {currentCategory && (
+                  <div style={{ 
+                    marginTop: '10px', 
+                    fontSize: '12px', 
+                    color: '#7f8c8d' 
+                  }}>
+                    Try a different search term or clear the search to see all {currentCategory} recipes.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+        ) : (
+          <>
+            <RecipeList
+              recipes={paginatedRecipes}
+              favorites={favorites}
+              cart={cart}
+              onFavorite={handleFavorite}
+              onCartAdd={handleCartAdd}
+              onCartRemove={handleCartRemove}
+              onViewRecipe={handleViewRecipe}
+            />
+            
+            {/* Show pagination only if there are recipes */}
+            {filteredRecipes.length > 0 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
+            )}
+          </>
         )}
 
-        <RecipeList
-          recipes={paginatedRecipes}
-          favorites={favorites}
-          cart={cart}
-          onFavorite={handleFavorite}
-          onCartAdd={handleCartAdd}
-          onCartRemove={handleCartRemove}
-          onViewRecipe={handleViewRecipe}
-        />
-        <Pagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          onPageChange={handlePageChange}
-        />
         {selectedRecipe && (
           <RecipeDetails recipe={selectedRecipe} onClose={handleCloseRecipe} />
         )}
-
+        
         {/* Render Toaster only when there's a message */}
         {toastMsg && (
-          <Toaster
-            key={toastKey}
-            message={toastMsg}
-            onClose={hideToast}
+          <Toaster 
+            key={toastKey} 
+            message={toastMsg} 
+            onClose={hideToast} 
           />
         )}
         
