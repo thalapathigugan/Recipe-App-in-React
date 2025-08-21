@@ -9,7 +9,7 @@ import RecipeList from './components/RecipeList';
 
 const API_BASE_URL = 'https://www.themealdb.com/api/json/v1/1';
 const RECIPES_PER_PAGE = 20;
-const MIN_HOME_RECIPES = 120; // Minimum 6 pages * 20 recipes per page
+const MIN_HOME_RECIPES = 120; // Minimum 8 pages * 20 recipes per page
 
 function getLocal(key, fallback) {
   try {
@@ -270,6 +270,7 @@ function App() {
   const [toastKey, setToastKey] = useState(0);
   const [homeRecipes, setHomeRecipes] = useState([]);
   const [isLoadingHome, setIsLoadingHome] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Helper function to show toast messages with proper reset
   const showToast = (message) => {
@@ -352,8 +353,8 @@ function App() {
   // Fetch recipes based on view/search/category
   useEffect(() => {
     async function fetchRecipes() {
+      setIsLoading(true);
       let result = [];
-      
       if (currentView === 'favorites') {
         result = favorites;
       } else if (currentView === 'cart') {
@@ -366,34 +367,27 @@ function App() {
           const data = await res.json();
           return data.meals ? data.meals[0] : null;
         }));
-        result = recipes.filter(Boolean);
+        result = recipes;
       } else {
-        // For home/search/category views
-        if (currentView === 'home' && !currentCategory && !searchTerm) {
-          // HOME PAGE: Use fixed cached recipes
-          result = homeRecipes;
-        } else if (currentCategory && !searchTerm) {
-          // Category view without search - use enriched category fetcher
-          result = await HomePageRecipeManager.fetchCategoryRecipesWithDetails(currentCategory);
-        } else if (currentCategory && searchTerm) {
-          // Category-specific search with enriched details
-          const categoryRecipes = await HomePageRecipeManager.fetchCategoryRecipesWithDetails(currentCategory);
-          
+        // CATEGORY-SPECIFIC SEARCH LOGIC
+        if (currentCategory && searchTerm) {
+          // Step 1: Get all recipes from the selected category
+          const categoryRes = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
+          const categoryData = await categoryRes.json();
+          const categoryRecipes = categoryData.meals || [];
+          // Step 2: Search within category recipes by name
           const searchLower = searchTerm.toLowerCase();
-          result = categoryRecipes.filter(recipe => 
+          result = categoryRecipes.filter(recipe =>
             recipe.strMeal.toLowerCase().includes(searchLower)
           );
-          
-          // Also fetch search results and filter by category for more comprehensive results
+          // Optional: Also fetch search results and filter by category for more comprehensive results
           try {
             const searchRes = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
             const searchData = await searchRes.json();
             const searchRecipes = searchData.meals || [];
-            
-            const categoryFilteredSearch = searchRecipes.filter(recipe => 
+            const categoryFilteredSearch = searchRecipes.filter(recipe =>
               recipe.strCategory === currentCategory
             );
-            
             // Merge and deduplicate results
             const mergedResults = [...result];
             categoryFilteredSearch.forEach(searchRecipe => {
@@ -401,27 +395,35 @@ function App() {
                 mergedResults.push(searchRecipe);
               }
             });
-            
             result = mergedResults;
           } catch (error) {
             console.error('Error fetching search results:', error);
           }
-        } else if (searchTerm && !currentCategory) {
-          // Global search without category
+        }
+        // If only category is selected (no search term)
+        else if (currentCategory && !searchTerm) {
+          const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
+          const data = await res.json();
+          result = data.meals || [];
+        }
+        // If only search term is provided (no category filter)
+        else if (searchTerm && !currentCategory) {
           const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
           const data = await res.json();
           result = data.meals || [];
-        } else {
-          // Default fallback - use home recipes
-          result = homeRecipes;
+        }
+        // Default: show all recipes (home view)
+        else {
+          const res = await fetch(`${API_BASE_URL}/search.php?s=`);
+          const data = await res.json();
+          result = data.meals || [];
         }
       }
-      
-      setRecipes(result);
+      setRecipes(result.filter(Boolean));
+      setIsLoading(false);
     }
-    
     fetchRecipes();
-  }, [currentView, currentCategory, favorites, cart, homeRecipes]);
+  }, [currentView, currentCategory, searchTerm, favorites, cart]);
 
   // Context-aware filtering
   useEffect(() => {
@@ -515,8 +517,8 @@ function App() {
   const handleViewChange = (view) => {
     setCurrentView(view);
     setCurrentPage(1);
-    // Clear search when changing to non-contextual views
-    if (view === 'home') {
+    // Only clear search/category if leaving search/category views
+    if (view !== 'search' && view !== 'category') {
       setSearchTerm('');
       setCurrentCategory(null);
     }
@@ -525,7 +527,6 @@ function App() {
   const handleCategoryChange = (cat) => {
     const newCategory = cat === '__all__' ? null : cat;
     setCurrentCategory(newCategory);
-    
     // Update view based on category and search term
     if (newCategory && searchTerm) {
       setCurrentView('search');
@@ -536,20 +537,12 @@ function App() {
     } else {
       setCurrentView('home');
     }
-    
     setCurrentPage(1);
   };
 
   const handleSearch = (term) => {
     setSearchTerm(term);
-    setCurrentPage(1);
-    
-    // For favorites and cart views, don't change the view - just filter in context
-    if (currentView === 'favorites' || currentView === 'cart') {
-      return; // Stay in the same view, filtering will happen in useEffect
-    }
-    
-    // For other views, update view based on search term and category
+    // Update view based on search term and category
     if (term && currentCategory) {
       setCurrentView('search');
     } else if (term && !currentCategory) {
@@ -559,6 +552,7 @@ function App() {
     } else {
       setCurrentView('home');
     }
+    setCurrentPage(1);
   };
 
   // Get search placeholder based on current context
@@ -587,11 +581,11 @@ function App() {
         
         {/* Show results message */}
         {searchTerm && (
-          <div className="search-results-message" style={{ 
-            padding: '10px 20px', 
-            fontSize: '14px', 
+          <div className="search-results-message" style={{
+            padding: '10px 20px',
+            fontSize: '14px',
             color: '#666',
-            borderBottom: '1px solid #eee' 
+            borderBottom: '1px solid #eee'
           }}>
             {resultsMessage}
           </div>
@@ -599,16 +593,16 @@ function App() {
 
         {/* Loading indicator for home page */}
         {currentView === 'home' && isLoadingHome && (
-          <div style={{ 
-            padding: '40px 20px', 
-            textAlign: 'center', 
-            fontSize: '16px', 
-            color: '#666' 
+          <div style={{
+            padding: '40px 20px',
+            textAlign: 'center',
+            fontSize: '16px',
+            color: '#666'
           }}>
             Loading recipes...
           </div>
         )}
-        
+
         <RecipeList
           recipes={paginatedRecipes}
           favorites={favorites}
@@ -626,13 +620,13 @@ function App() {
         {selectedRecipe && (
           <RecipeDetails recipe={selectedRecipe} onClose={handleCloseRecipe} />
         )}
-        
+
         {/* Render Toaster only when there's a message */}
         {toastMsg && (
-          <Toaster 
-            key={toastKey} 
-            message={toastMsg} 
-            onClose={hideToast} 
+          <Toaster
+            key={toastKey}
+            message={toastMsg}
+            onClose={hideToast}
           />
         )}
         
