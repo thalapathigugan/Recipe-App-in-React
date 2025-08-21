@@ -87,6 +87,33 @@ class HomePageRecipeManager {
     'a', 'e', 'i', 'o', 'u', 'b', 'c', 'd', 'f', 'g', 'h', 'l', 'm', 'n', 'p', 'r', 's', 't'
   ];
 
+  // Helper function to ensure recipes have category information
+  static async enrichRecipeWithCategory(recipe, knownCategory = null) {
+    // If recipe already has category info, return as is
+    if (recipe.strCategory) {
+      return recipe;
+    }
+
+    // If we know the category, add it
+    if (knownCategory) {
+      return { ...recipe, strCategory: knownCategory };
+    }
+
+    // Otherwise, fetch full details to get category
+    try {
+      const res = await fetch(`${API_BASE_URL}/lookup.php?i=${recipe.idMeal}`);
+      const data = await res.json();
+      if (data.meals && data.meals[0]) {
+        return data.meals[0];
+      }
+    } catch (error) {
+      console.error(`Error fetching details for recipe ${recipe.idMeal}:`, error);
+    }
+
+    // Return original recipe as fallback
+    return recipe;
+  }
+
   static async fetchFixedHomeRecipes() {
     const allRecipes = [];
     const seenIds = new Set();
@@ -110,7 +137,22 @@ class HomePageRecipeManager {
             return false;
           }).slice(0, 12); // Take up to 12 from each category
           
-          allRecipes.push(...selectedRecipes);
+          // FORCE category information onto each recipe with validation
+          const enrichedRecipes = selectedRecipes.map(recipe => {
+            const recipeWithCategory = {
+              ...recipe,
+              strCategory: category // Explicitly set the category
+            };
+            
+            // Debug log to verify category is set
+            if (!recipeWithCategory.strCategory) {
+              console.warn(`Failed to set category for recipe: ${recipe.strMeal}`);
+            }
+            
+            return recipeWithCategory;
+          });
+          
+          allRecipes.push(...enrichedRecipes);
           
           // Break early if we have enough recipes
           if (allRecipes.length >= MIN_HOME_RECIPES) break;
@@ -129,7 +171,7 @@ class HomePageRecipeManager {
             const data = await res.json();
             const searchRecipes = data.meals || [];
             
-            // Add unique recipes
+            // Add unique recipes (search API returns full details including category)
             searchRecipes.forEach(recipe => {
               if (!seenIds.has(recipe.idMeal) && allRecipes.length < MIN_HOME_RECIPES) {
                 seenIds.add(recipe.idMeal);
@@ -160,8 +202,20 @@ class HomePageRecipeManager {
         }
       }
 
-      // Sort by meal name for consistent ordering
-      return allRecipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
+      // Debug log to check final results
+      const finalRecipes = allRecipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
+      
+      // Verify all recipes have categories
+      const recipesWithoutCategory = finalRecipes.filter(recipe => !recipe.strCategory);
+      if (recipesWithoutCategory.length > 0) {
+        console.warn(`${recipesWithoutCategory.length} recipes without categories:`, 
+          recipesWithoutCategory.map(r => r.strMeal));
+      }
+      
+      console.log(`Fetched ${finalRecipes.length} home recipes with categories:`, 
+        finalRecipes.slice(0, 3).map(r => `${r.strMeal} (${r.strCategory})`));
+      
+      return finalRecipes;
 
     } catch (error) {
       console.error('Error in fetchFixedHomeRecipes:', error);
@@ -175,6 +229,28 @@ class HomePageRecipeManager {
         console.error('Final fallback failed:', fallbackError);
         return [];
       }
+    }
+  }
+
+  // Helper function to fetch recipes with full category details for category view
+  static async fetchCategoryRecipesWithDetails(category) {
+    try {
+      // First get the list of recipes in the category
+      const res = await fetch(`${API_BASE_URL}/filter.php?c=${category}`);
+      const data = await res.json();
+      const categoryRecipes = data.meals || [];
+
+      // For category view, FORCE category info onto each recipe
+      const enrichedRecipes = categoryRecipes.map(recipe => ({
+        ...recipe,
+        strCategory: category // Explicitly set the category
+      }));
+
+      return enrichedRecipes;
+
+    } catch (error) {
+      console.error(`Error fetching category recipes for ${category}:`, error);
+      return [];
     }
   }
 }
@@ -209,28 +285,44 @@ function App() {
       const cacheTimestamp = getLocal('homeRecipesTimestamp', 0);
       const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
       
-      // Use cache if it's less than 1 hour old and has enough recipes
+      // Check if cached recipes have proper category information
+      const hasValidCategories = cachedHomeRecipes && cachedHomeRecipes.length > 0 && 
+        cachedHomeRecipes.every(recipe => recipe.strCategory && recipe.strCategory !== 'N/A');
+      
+      // Use cache if it's less than 1 hour old, has enough recipes, AND has valid categories
       if (cachedHomeRecipes && 
           cachedHomeRecipes.length >= MIN_HOME_RECIPES &&
-          (Date.now() - cacheTimestamp < oneHour)) {
+          (Date.now() - cacheTimestamp < oneHour) &&
+          hasValidCategories) {
         setHomeRecipes(cachedHomeRecipes);
         return;
       }
 
-      // Fetch fresh recipes
+      // Fetch fresh recipes (cache is invalid or doesn't have categories)
       setIsLoadingHome(true);
       try {
         const fixedRecipes = await HomePageRecipeManager.fetchFixedHomeRecipes();
-        setHomeRecipes(fixedRecipes);
         
-        // Cache the results
-        setLocal('homeRecipes', fixedRecipes);
+        // Double-check that all recipes have categories before setting
+        const recipesWithCategories = fixedRecipes.map(recipe => {
+          if (!recipe.strCategory || recipe.strCategory === 'N/A') {
+            console.warn(`Recipe ${recipe.strMeal} missing category, attempting to fix...`);
+            // Try to determine category from cached data or set a default
+            return { ...recipe, strCategory: 'General' };
+          }
+          return recipe;
+        });
+        
+        setHomeRecipes(recipesWithCategories);
+        
+        // Cache the results with categories
+        setLocal('homeRecipes', recipesWithCategories);
         setLocal('homeRecipesTimestamp', Date.now());
       } catch (error) {
         console.error('Error fetching home recipes:', error);
-        // Use any cached recipes as fallback
-        const cachedFallback = getLocal('homeRecipes', []);
-        setHomeRecipes(cachedFallback);
+        // Clear invalid cache and try a basic fetch
+        setLocal('homeRecipes', []);
+        setHomeRecipes([]);
       } finally {
         setIsLoadingHome(false);
       }
@@ -263,15 +355,11 @@ function App() {
           // HOME PAGE: Use fixed cached recipes
           result = homeRecipes;
         } else if (currentCategory && !searchTerm) {
-          // Category view without search
-          const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
-          const data = await res.json();
-          result = data.meals || [];
+          // Category view without search - use enriched category fetcher
+          result = await HomePageRecipeManager.fetchCategoryRecipesWithDetails(currentCategory);
         } else if (currentCategory && searchTerm) {
-          // Category-specific search
-          const categoryRes = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
-          const categoryData = await categoryRes.json();
-          const categoryRecipes = categoryData.meals || [];
+          // Category-specific search with enriched details
+          const categoryRecipes = await HomePageRecipeManager.fetchCategoryRecipesWithDetails(currentCategory);
           
           const searchLower = searchTerm.toLowerCase();
           result = categoryRecipes.filter(recipe => 
