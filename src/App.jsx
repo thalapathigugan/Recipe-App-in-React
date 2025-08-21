@@ -9,6 +9,7 @@ import RecipeList from './components/RecipeList';
 
 const API_BASE_URL = 'https://www.themealdb.com/api/json/v1/1';
 const RECIPES_PER_PAGE = 20;
+const MIN_HOME_RECIPES = 120; // Minimum 6 pages * 20 recipes per page
 
 function getLocal(key, fallback) {
   try {
@@ -30,7 +31,7 @@ class ContextualSearchManager {
     }
 
     const query = searchTerm.toLowerCase().trim();
-    
+
     return items.filter(recipe => {
       const searchableFields = [
         recipe.strMeal,
@@ -40,7 +41,7 @@ class ContextualSearchManager {
         recipe.strInstructions
       ].filter(Boolean); // Remove undefined/null values
 
-      return searchableFields.some(field => 
+      return searchableFields.some(field =>
         field.toLowerCase().includes(query)
       );
     });
@@ -58,8 +59,8 @@ class ContextualSearchManager {
   }
 
   static getResultsMessage(totalResults, filteredResults, searchTerm, currentView) {
-    const context = currentView === 'cart' ? 'cart' : 
-                   currentView === 'favorites' ? 'favorites' : 'recipes';
+    const context = currentView === 'cart' ? 'cart' :
+                    currentView === 'favorites' ? 'favorites' : 'recipes';
     
     if (!searchTerm || searchTerm.trim() === '') {
       return `Showing all ${context} (${totalResults})`;
@@ -73,9 +74,114 @@ class ContextualSearchManager {
   }
 }
 
+// Fixed home page recipe fetcher
+class HomePageRecipeManager {
+  // Fixed list of categories to ensure consistent results
+  static FIXED_CATEGORIES = [
+    'Beef', 'Chicken', 'Pork', 'Seafood', 'Vegetarian', 'Lamb',
+    'Pasta', 'Dessert', 'Breakfast', 'Side', 'Starter', 'Vegan'
+  ];
+
+  // Fixed search terms to get consistent recipe sets
+  static FIXED_SEARCH_TERMS = [
+    'a', 'e', 'i', 'o', 'u', 'b', 'c', 'd', 'f', 'g', 'h', 'l', 'm', 'n', 'p', 'r', 's', 't'
+  ];
+
+  static async fetchFixedHomeRecipes() {
+    const allRecipes = [];
+    const seenIds = new Set();
+
+    try {
+      // First, fetch from fixed categories (consistent order)
+      for (let i = 0; i < this.FIXED_CATEGORIES.length; i++) {
+        const category = this.FIXED_CATEGORIES[i];
+        try {
+          const res = await fetch(`${API_BASE_URL}/filter.php?c=${category}`);
+          const data = await res.json();
+          const categoryRecipes = data.meals || [];
+          
+          // Take recipes in a consistent manner (not random)
+          // Take every 2nd recipe to get variety but maintain consistency
+          const selectedRecipes = categoryRecipes.filter((recipe, index) => {
+            if (index % 2 === 0 && !seenIds.has(recipe.idMeal)) {
+              seenIds.add(recipe.idMeal);
+              return true;
+            }
+            return false;
+          }).slice(0, 12); // Take up to 12 from each category
+          
+          allRecipes.push(...selectedRecipes);
+          
+          // Break early if we have enough recipes
+          if (allRecipes.length >= MIN_HOME_RECIPES) break;
+          
+        } catch (error) {
+          console.error(`Error fetching ${category} recipes:`, error);
+        }
+      }
+
+      // If still need more recipes, fetch using fixed search terms
+      if (allRecipes.length < MIN_HOME_RECIPES) {
+        for (let i = 0; i < this.FIXED_SEARCH_TERMS.length && allRecipes.length < MIN_HOME_RECIPES; i++) {
+          const searchTerm = this.FIXED_SEARCH_TERMS[i];
+          try {
+            const res = await fetch(`${API_BASE_URL}/search.php?s=${searchTerm}`);
+            const data = await res.json();
+            const searchRecipes = data.meals || [];
+            
+            // Add unique recipes
+            searchRecipes.forEach(recipe => {
+              if (!seenIds.has(recipe.idMeal) && allRecipes.length < MIN_HOME_RECIPES) {
+                seenIds.add(recipe.idMeal);
+                allRecipes.push(recipe);
+              }
+            });
+          } catch (error) {
+            console.error(`Error fetching search results for "${searchTerm}":`, error);
+          }
+        }
+      }
+
+      // If still need more, do a final fallback search
+      if (allRecipes.length < MIN_HOME_RECIPES) {
+        try {
+          const res = await fetch(`${API_BASE_URL}/search.php?s=`);
+          const data = await res.json();
+          const fallbackRecipes = data.meals || [];
+          
+          fallbackRecipes.forEach(recipe => {
+            if (!seenIds.has(recipe.idMeal) && allRecipes.length < MIN_HOME_RECIPES) {
+              seenIds.add(recipe.idMeal);
+              allRecipes.push(recipe);
+            }
+          });
+        } catch (error) {
+          console.error('Error fetching fallback recipes:', error);
+        }
+      }
+
+      // Sort by meal name for consistent ordering
+      return allRecipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
+
+    } catch (error) {
+      console.error('Error in fetchFixedHomeRecipes:', error);
+      // Final fallback
+      try {
+        const res = await fetch(`${API_BASE_URL}/search.php?s=`);
+        const data = await res.json();
+        const recipes = data.meals || [];
+        return recipes.sort((a, b) => a.strMeal.localeCompare(b.strMeal));
+      } catch (fallbackError) {
+        console.error('Final fallback failed:', fallbackError);
+        return [];
+      }
+    }
+  }
+}
+
 function App() {
   const [recipes, setRecipes] = useState([]);
-  const [filteredRecipes, setFilteredRecipes] = useState([]); // New state for filtered results
+  const [filteredRecipes, setFilteredRecipes] = useState([]);
   const [categories, setCategories] = useState([]);
   const [currentView, setCurrentView] = useState('home');
   const [currentCategory, setCurrentCategory] = useState(null);
@@ -85,6 +191,8 @@ function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
+  const [homeRecipes, setHomeRecipes] = useState([]); // Cache for home page recipes
+  const [isLoadingHome, setIsLoadingHome] = useState(false);
 
   // Fetch categories on mount
   useEffect(() => {
@@ -93,7 +201,45 @@ function App() {
       .then(data => setCategories(data.categories || []));
   }, []);
 
-  // Fetch recipes based on view/search/category with category-specific search logic
+  // Fetch and cache fixed home recipes on mount
+  useEffect(() => {
+    const fetchHomeRecipes = async () => {
+      // Check if we have cached home recipes
+      const cachedHomeRecipes = getLocal('homeRecipes', null);
+      const cacheTimestamp = getLocal('homeRecipesTimestamp', 0);
+      const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
+      
+      // Use cache if it's less than 1 hour old and has enough recipes
+      if (cachedHomeRecipes && 
+          cachedHomeRecipes.length >= MIN_HOME_RECIPES &&
+          (Date.now() - cacheTimestamp < oneHour)) {
+        setHomeRecipes(cachedHomeRecipes);
+        return;
+      }
+
+      // Fetch fresh recipes
+      setIsLoadingHome(true);
+      try {
+        const fixedRecipes = await HomePageRecipeManager.fetchFixedHomeRecipes();
+        setHomeRecipes(fixedRecipes);
+        
+        // Cache the results
+        setLocal('homeRecipes', fixedRecipes);
+        setLocal('homeRecipesTimestamp', Date.now());
+      } catch (error) {
+        console.error('Error fetching home recipes:', error);
+        // Use any cached recipes as fallback
+        const cachedFallback = getLocal('homeRecipes', []);
+        setHomeRecipes(cachedFallback);
+      } finally {
+        setIsLoadingHome(false);
+      }
+    };
+
+    fetchHomeRecipes();
+  }, []);
+
+  // Fetch recipes based on view/search/category
   useEffect(() => {
     async function fetchRecipes() {
       let result = [];
@@ -114,52 +260,8 @@ function App() {
       } else {
         // For home/search/category views
         if (currentView === 'home' && !currentCategory && !searchTerm) {
-          // HOME PAGE: Fetch recipes from multiple categories to show variety
-          try {
-            const categoryList = ['Beef', 'Chicken', 'Dessert', 'Pasta', 'Seafood', 'Vegetarian', 'Breakfast', 'Side'];
-            const allRecipes = [];
-            
-            // Fetch recipes from multiple categories for home page variety
-            await Promise.all(categoryList.map(async (category) => {
-              try {
-                const res = await fetch(`${API_BASE_URL}/filter.php?c=${category}`);
-                const data = await res.json();
-                const categoryRecipes = data.meals || [];
-                
-                // Take first 15 recipes from each category to ensure variety
-                allRecipes.push(...categoryRecipes.slice(0, 15));
-              } catch (error) {
-                console.error(`Error fetching ${category} recipes:`, error);
-              }
-            }));
-            
-            // Shuffle the results to mix different categories
-            result = allRecipes.sort(() => Math.random() - 0.5);
-            
-            // If we don't get enough recipes, fallback to search all
-            if (result.length < 50) {
-              console.log('Fallback: Using search API for home page');
-              const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-              const data = await res.json();
-              const searchResults = data.meals || [];
-              
-              // Merge and deduplicate
-              const mergedResults = [...result];
-              searchResults.forEach(recipe => {
-                if (!mergedResults.some(r => r.idMeal === recipe.idMeal)) {
-                  mergedResults.push(recipe);
-                }
-              });
-              
-              result = mergedResults;
-            }
-          } catch (error) {
-            console.error('Error fetching home page recipes:', error);
-            // Final fallback
-            const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-            const data = await res.json();
-            result = data.meals || [];
-          }
+          // HOME PAGE: Use fixed cached recipes
+          result = homeRecipes;
         } else if (currentCategory && !searchTerm) {
           // Category view without search
           const res = await fetch(`${API_BASE_URL}/filter.php?c=${currentCategory}`);
@@ -204,10 +306,8 @@ function App() {
           const data = await res.json();
           result = data.meals || [];
         } else {
-          // Default fallback
-          const res = await fetch(`${API_BASE_URL}/search.php?s=`);
-          const data = await res.json();
-          result = data.meals || [];
+          // Default fallback - use home recipes
+          result = homeRecipes;
         }
       }
       
@@ -215,9 +315,9 @@ function App() {
     }
     
     fetchRecipes();
-  }, [currentView, currentCategory, favorites, cart]); // Removed searchTerm from dependencies
+  }, [currentView, currentCategory, favorites, cart, homeRecipes]);
 
-  // New useEffect for context-aware filtering
+  // Context-aware filtering
   useEffect(() => {
     if (currentView === 'favorites' || currentView === 'cart') {
       // Apply contextual search for favorites and cart
@@ -308,7 +408,6 @@ function App() {
     }
   };
 
-  // UPDATED: Category change handler with category-specific search logic
   const handleCategoryChange = (cat) => {
     const newCategory = cat === '__all__' ? null : cat;
     setCurrentCategory(newCategory);
@@ -327,7 +426,6 @@ function App() {
     setCurrentPage(1);
   };
 
-  // UPDATED: Search handler with context-aware logic
   const handleSearch = (term) => {
     setSearchTerm(term);
     setCurrentPage(1);
@@ -370,7 +468,7 @@ function App() {
           currentCategory={currentCategory}
           setCurrentCategory={handleCategoryChange}
           categories={categories}
-          placeholder={searchPlaceholder} // Pass dynamic placeholder
+          placeholder={searchPlaceholder}
         />
         
         {/* Show results message */}
@@ -384,9 +482,21 @@ function App() {
             {resultsMessage}
           </div>
         )}
+
+        {/* Loading indicator for home page */}
+        {currentView === 'home' && isLoadingHome && (
+          <div style={{ 
+            padding: '40px 20px', 
+            textAlign: 'center', 
+            fontSize: '16px', 
+            color: '#666' 
+          }}>
+            Loading recipes...
+          </div>
+        )}
         
         <RecipeList
-          recipes={paginatedRecipes} // Using filtered and paginated recipes
+          recipes={paginatedRecipes}
           favorites={favorites}
           cart={cart}
           onFavorite={handleFavorite}
