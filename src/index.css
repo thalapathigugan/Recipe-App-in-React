@@ -930,6 +930,10 @@ body h2 {
   html, body {
     font-size: 13px;
   }
+  .recipe {
+    width: 320px;
+    margin: 0 auto 0 auto;
+  }
 
   .categories-select {
     min-height: 40px !important;

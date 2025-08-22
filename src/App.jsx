@@ -19,12 +19,13 @@ function App() {
   // recipes state removed, use filteredRecipes only
   const [filteredRecipes, setFilteredRecipes] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [currentView, setCurrentView] = useState('home');
+  const [currentView, setCurrentView] = useState(() => getLocal('recipe_current_view', 'home'));
   const [currentCategory, setCurrentCategory] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  // Initialize searchTerm from localStorage
+  const [searchTerm, setSearchTerm] = useState(() => getLocal('recipe_search_term', ''));
   const [cart, setCart] = useState(getLocal('cart', {}));
   const [favorites, setFavorites] = useState(getLocal('favorites', []));
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(() => getLocal('recipe_current_page', 1));
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
   const [toastKey, setToastKey] = useState(0);
@@ -247,11 +248,16 @@ function App() {
 
   const handleCloseRecipe = () => setSelectedRecipe(null);
   
-  const handlePageChange = (page) => setCurrentPage(page);
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    setLocal('recipe_current_page', page);
+  };
 
   const handleViewChange = (view) => {
     setCurrentView(view);
+    setLocal('recipe_current_view', view);
     setCurrentPage(1);
+    setLocal('recipe_current_page', 1);
     // Clear search when changing to non-contextual views
     if (view === 'home') {
       setSearchTerm('');
@@ -279,13 +285,12 @@ function App() {
 
   const handleSearch = (term) => {
     setSearchTerm(term);
+    setLocal('recipe_search_term', term); // Persist search term
     setCurrentPage(1);
-    
     // For favorites and cart views, don't change the view - just filter in context
     if (currentView === 'favorites' || currentView === 'cart') {
       return; // Stay in the same view, filtering will happen in useEffect
     }
-    
     // For other views, update view based on search term and category
     if (term && currentCategory) {
       setCurrentView('search');
@@ -306,7 +311,7 @@ function App() {
     if (isLoadingHome && currentView === 'home') {
       return { type: 'loading', message: 'Loading recipes...' };
     }
-    
+
     if (isSearching && searchTerm) {
       return { type: 'loading', message: 'Searching...' };
     }
@@ -337,26 +342,30 @@ function App() {
     <div className="app-container">
       <Header cart={cart} onViewChange={handleViewChange} />
       <main>
-        <SearchBar
-          searchTerm={searchTerm}
-          setSearchTerm={handleSearch}
-          currentCategory={currentCategory}
-          setCurrentCategory={handleCategoryChange}
-          categories={categories}
-          placeholder={searchPlaceholder}
-        />
-        
-        {/* Show search results info */}
-        {searchTerm && !displayMessage && (
-          <div className="search-results-message" style={{ 
-            padding: '10px 20px', 
-            fontSize: '14px', 
-            color: '#666',
-            borderBottom: '1px solid #eee',
-            backgroundColor: 'transparent'
-          }}>
-            Found {filteredRecipes.length} result(s){currentCategory ? ` in ${currentCategory}` : ''} for "{searchTerm}"
-          </div>
+        {/* Hide SearchBar and category selection in favorites and cart views */}
+        {currentView !== 'favorites' && currentView !== 'cart' && (
+          <>
+            <SearchBar
+              searchTerm={searchTerm}
+              setSearchTerm={handleSearch}
+              currentCategory={currentCategory}
+              setCurrentCategory={handleCategoryChange}
+              categories={categories}
+              placeholder={searchPlaceholder}
+            />
+            {/* Show search results info */}
+            {searchTerm && !displayMessage && (
+              <div className="search-results-message" style={{ 
+                padding: '10px 20px', 
+                fontSize: '14px', 
+                color: '#666',
+                borderBottom: '1px solid #eee',
+                backgroundColor: 'transparent'
+              }}>
+                Found {filteredRecipes.length} result(s){currentCategory ? ` in ${currentCategory}` : ''} for "{searchTerm}"
+              </div>
+            )}
+          </>
         )}
 
         {/* Show loading, no results, or recipe list */}
