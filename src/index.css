@@ -513,6 +513,12 @@ body h2 {
   }
 }
 
+.nav-view-buttons button:active {
+  background: #3498db !important;
+  color: #fff !important;
+  border: 1.5px solid #3498db !important;
+}
+
 .nav-view-buttons button,
 .categories-toggle-btn,
 .view-cart-btn,
