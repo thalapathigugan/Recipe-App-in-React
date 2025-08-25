@@ -2,7 +2,7 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Montserrat', 'Lato', 'Open Sans', Arial, sans-serif;
+  font-family: 'Edu NSW ACT Cursive', 'Molle', 'Roboto', 'Slackside One', Arial, sans-serif;
 }
 
 html {
@@ -22,14 +22,22 @@ button,
 }
 
 body{
-  background: radial-gradient(circle at 50% 50%, #f7fbff, #e3f0ff);
-  color: #23406e;
+background-image: radial-gradient(18% 28% at 24% 50%, #CEFAFFFF 7%, #073AFF00 100%),radial-gradient(18% 28% at 18% 71%, #FFFFFF59 6%, #073AFF00 100%),radial-gradient(70% 53% at 36% 76%, #73F2FFFF 0%, #073AFF00 100%),radial-gradient(42% 53% at 15% 94%, #FFFFFFFF 7%, #073AFF00 100%),radial-gradient(42% 53% at 34% 72%, #FFFFFFFF 7%, #073AFF00 100%),radial-gradient(18% 28% at 35% 87%, #FFFFFFFF 7%, #073AFF00 100%),radial-gradient(31% 43% at 7% 98%, #FFFFFFFF 24%, #073AFF00 100%),radial-gradient(21% 37% at 72% 23%, #6bd2eec3 24%, #073AFF00 100%),radial-gradient(35% 56% at 91% 74%, #A4D7FDFF 9%, #073AFF00 100%),radial-gradient(74% 86% at 67% 38%, #f8e5b0dd 24%, #073AFF00 100%),linear-gradient(148deg, #8EC2E8FF 16%, rgb(220, 142, 232) 27%, rgb(172, 0, 252) 64%, rgb(205, 142, 232) 90%, rgb(208, 142, 232) 91%, rgb(205, 142, 232) 94%);  color: #46236e;
   transition: all 0.3s ease;
+  background-repeat: no-repeat;
+  background-size: 100%;
+  min-height: 100vh;
+  max-width: 100%;
+
+}
+
+.search-results-message{
+  border: none !important;
 }
 
 header nav{
-  background: #fff;
-  border-bottom: 2px solid #b3d8fd;
+  background: radial-gradient(circle at 100%, #a3e0f8, #cedcff);
+  border-bottom: 2px solid #e22460c9;
   box-shadow: 0 4px 24px rgba(179, 216, 253, 0.12);
   padding: 24px 32px;
   border-radius: 0 0 18px 18px;
@@ -45,7 +53,7 @@ header nav{
   height: 68px;
   width: 68px;
   object-fit: contain;
-  margin-right: 6px;
+  /* margin-right: 6px; */
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(179,216,253,0.10);
   display: inline-block;
@@ -56,7 +64,7 @@ header nav h1 {
   display: inline-block;
   vertical-align: middle;
   margin-left: 0;
-  font-size: 32px;
+  font-size: 20px;
   font-weight: 800;
   letter-spacing: 2px;
   text-transform: uppercase;
@@ -69,6 +77,11 @@ header nav form{
   display: flex;
   justify-content: center;
   gap: 10px;
+}
+
+.header-logo-link h1 {
+  margin-top: 20px;
+  margin-left: -6px;
 }
 
 .search-input-wrapper {
@@ -112,7 +125,7 @@ header nav form input:focus {
 form input[type="text"],
 form button[type="submit"] {
   border: 1.5px solid #b3d8fd;
-  font-size: 18px;
+  font-size: 13px;
   padding: 12px 16px;
   border-radius: 8px;
   background: #f7fbff;
@@ -151,8 +164,8 @@ form button[type="submit"]{
 }
 
 .recipe{
-  background: white;
-  border-radius: 15px;
+  background: radial-gradient(circle at 100%, #a3e0f8, #cedcff);
+  border-radius: 20px;
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
   cursor: pointer;
@@ -161,16 +174,16 @@ form button[type="submit"]{
   align-items: center;
   text-align: center;
   height: 100%;
-  border: 1.5px solid #b3d8fd;
+  border: 2.5px solid #d06ff3;
   color: #23406e;
   box-shadow: 0 8px 32px rgba(52, 152, 219, 0.08), 0 2px 8px rgba(179,216,253,0.12);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   animation: fadeInUp 0.6s ease-out;
 }
 
 .recipe:hover{
-  transform: translateY(-8px) scale(1.02);
-  box-shadow: 0 05px 60px #6b8b96b3, 0 8px 24px rgba(179,216,253,0.25);
+  transform: translateY(-8px) scale(1.01);
+  box-shadow: 0 5px 60px #6b8b96b3, 0 8px 24px rgba(179,216,253,0.25);
 }
 
 .recipe img{
@@ -182,9 +195,10 @@ form button[type="submit"]{
 }
 
 .recipe h3{
-  font-size: 26px;
+  font-size: 20px;
+  font-family: sans-serif !important;
   margin: 16px 0 8px 0;
-  color: #3498db;
+  color: #32309f;
   font-weight: 700;
 }
 
@@ -433,6 +447,10 @@ body::-webkit-scrollbar-track{
     border-radius: 0 0 12px 12px;
   }
 
+  .recipe-container{
+        margin-bottom: 100px;
+  }
+
   header nav form{
     flex-direction: column;
     gap: 8px;
@@ -537,11 +555,11 @@ body h2 {
   align-items: center;
   gap: 6px;
 }
-.nav-view-buttons button:hover,
-.categories-toggle-btn:hover,
-.view-cart-btn:hover,
-.view-favorites-btn:hover,
-.back-home-btn:hover {
+.nav-view-buttons button:active,
+.categories-toggle-btn:active,
+.view-cart-btn:active,
+.view-favorites-btn:active,
+.back-home-btn:active {
   background: #e3f0ff !important;
   color: #23406e !important;
   border: 1.5px solid #3498db !important;
@@ -964,7 +982,7 @@ body h2 {
     right: 0;
     bottom: 0;
     z-index: 2000;
-    background: #fff;
+    background: white;
     border-top: 1.5px solid #b3d8fd;
     box-shadow: 0 -2px 12px rgba(52,152,219,0.08);
     justify-content: space-around;
@@ -1005,7 +1023,7 @@ body h2 {
     right: 0;
     bottom: 0;
     z-index: 2000;
-    background: #fff;
+    background: white;
     border-top: 1.5px solid #b3d8fd;
     box-shadow: 0 -2px 12px rgba(52,152,219,0.08);
     justify-content: space-around;
